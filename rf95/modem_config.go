@@ -36,3 +36,18 @@ func (modem *Modem) Mode(mode ModemMode) error {
 		return nil
 	}
 }
+
+// Frequency changes the rf95modem's frequency, specified in MHz.
+func (modem *Modem) Frequency(frequency float64) error {
+	modem.readLock.Add(1)
+	defer modem.readLock.Done()
+
+	cmd := fmt.Sprintf("AT+FREQ=%.2f\n", frequency)
+	if respMsg, cmdErr := modem.sendCmd(cmd); cmdErr != nil {
+		return cmdErr
+	} else if !strings.HasPrefix(respMsg, "Set Freq to: ") {
+		return fmt.Errorf("changing frequency returned unexpected response: %s", respMsg)
+	} else {
+		return nil
+	}
+}
