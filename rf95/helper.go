@@ -18,13 +18,32 @@ func parsePacketRx(msg string) (data []byte, err error) {
 	return hex.DecodeString(findings[1])
 }
 
-// sendCmd sends an AT command to the rf95modem and reads the responding line.
-func (modem *Modem) sendCmd(cmd string) (response string, err error) {
+// sendCmdMultiline sends an AT command to the rf95modem and reads the amount of requested responding lines.
+func (modem *Modem) sendCmdMultiline(cmd string, respLines int) (responses []string, err error) {
 	if _, writeErr := modem.serialPort.Write([]byte(cmd)); writeErr != nil {
 		err = writeErr
 		return
 	}
 
-	response, err = modem.reader.ReadString('\n')
+	for i := 0; i < respLines; i++ {
+		if resp, respErr := modem.reader.ReadString('\n'); respErr != nil {
+			err = respErr
+			return
+		} else {
+			responses = append(responses, resp)
+		}
+	}
+
+	return
+}
+
+// sendCmd sends an AT command to the rf95modem and reads the responding line.
+func (modem *Modem) sendCmd(cmd string) (response string, err error) {
+	if responses, responsesErr := modem.sendCmdMultiline(cmd, 1); responsesErr != nil {
+		err = responsesErr
+	} else {
+		response = responses[0]
+	}
+
 	return
 }
