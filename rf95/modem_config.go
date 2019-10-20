@@ -33,7 +33,7 @@ func (modem *Modem) Mode(mode ModemMode) error {
 	} else if !strings.HasPrefix(respMsg, "+ Ok.") {
 		return fmt.Errorf("changing modem mode returned unexpected response: %s", respMsg)
 	} else {
-		return nil
+		return modem.updateMtu()
 	}
 }
 
@@ -48,6 +48,6 @@ func (modem *Modem) Frequency(frequency float64) error {
 	} else if !strings.HasPrefix(respMsg, "Set Freq to: ") {
 		return fmt.Errorf("changing frequency returned unexpected response: %s", respMsg)
 	} else {
-		return nil
+		return modem.updateMtu()
 	}
 }

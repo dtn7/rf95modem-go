@@ -109,3 +109,16 @@ func (modem *Modem) FetchStatus() (status Status, err error) {
 
 	return
 }
+
+// Mtu returns the rf95modem's MTU.
+func (modem *Modem) Mtu() (mtu int, err error) {
+	if modem.mtu == 0 {
+		if mtuErr := modem.updateMtu(); mtuErr != nil {
+			err = mtuErr
+			return
+		}
+	}
+
+	mtu = modem.mtu
+	return
+}

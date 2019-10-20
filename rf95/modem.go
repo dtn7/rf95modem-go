@@ -18,6 +18,7 @@ type Modem struct {
 	reader     *bufio.Reader
 	readBuff   *bytes.Buffer
 	readLock   sync.WaitGroup
+	mtu        int
 }
 
 func OpenModem(device string) (modem *Modem, err error) {
@@ -67,7 +68,9 @@ func (modem *Modem) Read(p []byte) (int, error) {
 	return modem.readBuff.Read(p)
 }
 
-func (modem *Modem) Write(p []byte) (int, error) {
+// Transmit the byte array whose length must be shorter than the Mtu. To transfer a byte array regardless
+// of its length, use Write.
+func (modem *Modem) Transmit(p []byte) (int, error) {
 	modem.readLock.Add(1)
 	defer modem.readLock.Done()
 
@@ -88,6 +91,31 @@ func (modem *Modem) Write(p []byte) (int, error) {
 	}
 }
 
+// Write the byte array to the rf95modem. If its length exceeds the Mtu, multiple packets will be send.
+func (modem *Modem) Write(p []byte) (n int, err error) {
+	if _, mtuErr := modem.Mtu(); mtuErr != nil {
+		err = mtuErr
+		return
+	}
+
+	for i := 0; i < len(p); i += modem.mtu {
+		bound := i + modem.mtu
+		if bound > len(p) {
+			bound = len(p)
+		}
+
+		tx, txErr := modem.Transmit(p[i:bound])
+		n += tx
+		if txErr != nil {
+			err = txErr
+			return
+		}
+	}
+
+	return
+}
+
+// Close the underlying serial connection.
 func (modem *Modem) Close() error {
 	modem.readLock.Wait()
 	return modem.serialPort.Close()

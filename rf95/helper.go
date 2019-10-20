@@ -47,3 +47,14 @@ func (modem *Modem) sendCmd(cmd string) (response string, err error) {
 
 	return
 }
+
+// updateMtu fetches the current MTU.
+func (modem *Modem) updateMtu() (err error) {
+	if status, statusErr := modem.FetchStatus(); statusErr != nil {
+		err = statusErr
+	} else {
+		modem.mtu = status.Mtu
+	}
+
+	return
+}
