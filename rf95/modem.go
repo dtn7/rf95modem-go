@@ -59,14 +59,10 @@ func (modem *Modem) Write(p []byte) (int, error) {
 	modem.readLock.Add(1)
 	defer modem.readLock.Done()
 
-	msg := fmt.Sprintf("AT+TX=%s\n", hex.EncodeToString(p))
-	if _, err := modem.serialPort.Write([]byte(msg)); err != nil {
-		return 0, err
-	}
-
-	respMsg, respErr := modem.reader.ReadString('\n')
-	if respErr != nil {
-		return 0, respErr
+	cmd := fmt.Sprintf("AT+TX=%s\n", hex.EncodeToString(p))
+	respMsg, cmdErr := modem.sendCmd(cmd)
+	if cmdErr != nil {
+		return 0, cmdErr
 	}
 
 	respPattern := regexp.MustCompile(`^\+SENT (\d+) bytes\.\r\n$`)
