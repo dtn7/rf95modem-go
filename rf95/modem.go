@@ -1,3 +1,5 @@
+// Package rf95 provides a software interface for a rf95modem. This allows packets to be received and sent
+// via the known Reader / Writer interfaces.
 package rf95
 
 import (
@@ -12,6 +14,8 @@ import (
 	"github.com/tarm/serial"
 )
 
+// Modem is a software library around the connection to a rf95modem. Thus, a Modem might receive and
+// transmit data via LoRa. Furthermore, both Reader and Writer are implemented.
 type Modem struct {
 	device     string
 	serialPort *serial.Port
@@ -21,6 +25,9 @@ type Modem struct {
 	mtu        int
 }
 
+// OpenModem tries to create a new Modem for a given device. This device must be a serial connection with
+// a rf95modem being active on the other side. Possible parameters might be /dev/ttyUSB0, or your operating
+// system's equivalent.
 func OpenModem(device string) (modem *Modem, err error) {
 	serialConf := &serial.Config{
 		Name: device,
