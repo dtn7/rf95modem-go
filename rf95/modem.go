@@ -2,6 +2,7 @@ package rf95
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/hex"
 	"fmt"
 	"regexp"
@@ -15,6 +16,7 @@ type Modem struct {
 	device     string
 	serialPort *serial.Port
 	reader     *bufio.Reader
+	readBuff   *bytes.Buffer
 	readLock   sync.WaitGroup
 }
 
@@ -34,12 +36,21 @@ func OpenModem(device string) (modem *Modem, err error) {
 		device:     device,
 		serialPort: serialPort,
 		reader:     bufio.NewReader(serialPort),
+		readBuff:   new(bytes.Buffer),
 	}
 
 	return
 }
 
+// Read the next received message in the given byte array.
+//
+// If the byte array's length is shorter than that of the message, the message's data is cached and read on
+// the next call. Should the cache be empty, this method blocks until data is received.
 func (modem *Modem) Read(p []byte) (int, error) {
+	if modem.readBuff.Len() > 0 {
+		return modem.readBuff.Read(p)
+	}
+
 	modem.readLock.Wait()
 
 	lineMsg, lineErr := modem.reader.ReadString('\n')
@@ -52,7 +63,8 @@ func (modem *Modem) Read(p []byte) (int, error) {
 		return 0, rxErr
 	}
 
-	return copy(p, rxBytes), nil
+	_, _ = modem.readBuff.Write(rxBytes)
+	return modem.readBuff.Read(p)
 }
 
 func (modem *Modem) Write(p []byte) (int, error) {
