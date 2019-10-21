@@ -26,12 +26,7 @@ func (modem *Modem) sendCmdMultiline(cmd string, respLines int) (responses []str
 	}
 
 	for i := 0; i < respLines; i++ {
-		if resp, respErr := modem.reader.ReadString('\n'); respErr != nil {
-			err = respErr
-			return
-		} else {
-			responses = append(responses, resp)
-		}
+		responses = append(responses, <-modem.msgQueue)
 	}
 
 	return

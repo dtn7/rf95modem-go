@@ -34,9 +34,6 @@ func (status Status) String() string {
 
 // FetchStatus queries the rf95modem's status information.
 func (modem *Modem) FetchStatus() (status Status, err error) {
-	modem.readLock.Add(1)
-	defer modem.readLock.Done()
-
 	respMsgs, cmdErr := modem.sendCmdMultiline("AT+INFO\n", 11)
 	if cmdErr != nil {
 		err = cmdErr

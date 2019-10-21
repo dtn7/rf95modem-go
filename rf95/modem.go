@@ -7,9 +7,11 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"regexp"
 	"strconv"
-	"sync"
+	"strings"
+	"time"
 
 	"github.com/tarm/serial"
 )
@@ -19,9 +21,11 @@ import (
 type Modem struct {
 	device     string
 	serialPort *serial.Port
-	reader     *bufio.Reader
 	readBuff   *bytes.Buffer
-	readLock   sync.WaitGroup
+	rxQueue    chan string
+	msgQueue   chan string
+	stopSyn    chan struct{}
+	stopAck    chan struct{}
 	mtu        int
 }
 
@@ -30,8 +34,9 @@ type Modem struct {
 // system's equivalent.
 func OpenModem(device string) (modem *Modem, err error) {
 	serialConf := &serial.Config{
-		Name: device,
-		Baud: 9600,
+		Name:        device,
+		Baud:        9600,
+		ReadTimeout: time.Second,
 	}
 
 	serialPort, serialPortErr := serial.OpenPort(serialConf)
@@ -43,11 +48,40 @@ func OpenModem(device string) (modem *Modem, err error) {
 	modem = &Modem{
 		device:     device,
 		serialPort: serialPort,
-		reader:     bufio.NewReader(serialPort),
 		readBuff:   new(bytes.Buffer),
+		rxQueue:    make(chan string, 32),
+		msgQueue:   make(chan string, 32),
+		stopSyn:    make(chan struct{}),
+		stopAck:    make(chan struct{}),
 	}
 
+	go modem.handleRead()
 	return
+}
+
+// handleRead dispatches the inbounding data to the rxQueue for received messages and msgQueue for everything else.
+func (modem *Modem) handleRead() {
+	var reader = bufio.NewReader(modem.serialPort)
+	for {
+		select {
+		case <-modem.stopSyn:
+			return
+
+		default:
+			lineMsg, lineErr := reader.ReadString('\n')
+			if lineErr == io.EOF {
+				continue
+			} else if lineErr != nil {
+				return
+			}
+
+			if strings.HasPrefix(lineMsg, "+RX") {
+				modem.rxQueue <- lineMsg
+			} else {
+				modem.msgQueue <- lineMsg
+			}
+		}
+	}
 }
 
 // Read the next received message in the given byte array.
@@ -59,13 +93,7 @@ func (modem *Modem) Read(p []byte) (int, error) {
 		return modem.readBuff.Read(p)
 	}
 
-	modem.readLock.Wait()
-
-	lineMsg, lineErr := modem.reader.ReadString('\n')
-	if lineErr != nil {
-		return 0, lineErr
-	}
-
+	lineMsg := <-modem.rxQueue
 	rxBytes, rxErr := parsePacketRx(lineMsg)
 	if rxErr != nil {
 		return 0, rxErr
@@ -78,9 +106,6 @@ func (modem *Modem) Read(p []byte) (int, error) {
 // Transmit the byte array whose length must be shorter than the Mtu. To transfer a byte array regardless
 // of its length, use Write.
 func (modem *Modem) Transmit(p []byte) (int, error) {
-	modem.readLock.Add(1)
-	defer modem.readLock.Done()
-
 	cmd := fmt.Sprintf("AT+TX=%s\n", hex.EncodeToString(p))
 	respMsg, cmdErr := modem.sendCmd(cmd)
 	if cmdErr != nil {
@@ -124,6 +149,8 @@ func (modem *Modem) Write(p []byte) (n int, err error) {
 
 // Close the underlying serial connection.
 func (modem *Modem) Close() error {
-	modem.readLock.Wait()
+	close(modem.stopSyn)
+	<-modem.stopAck
+
 	return modem.serialPort.Close()
 }

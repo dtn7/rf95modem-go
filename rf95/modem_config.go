@@ -24,9 +24,6 @@ const (
 
 // Mode sets the rf95modem's modem config.
 func (modem *Modem) Mode(mode ModemMode) error {
-	modem.readLock.Add(1)
-	defer modem.readLock.Done()
-
 	cmd := fmt.Sprintf("AT+MODE=%d\n", mode)
 	if respMsg, cmdErr := modem.sendCmd(cmd); cmdErr != nil {
 		return cmdErr
@@ -39,9 +36,6 @@ func (modem *Modem) Mode(mode ModemMode) error {
 
 // Frequency changes the rf95modem's frequency, specified in MHz.
 func (modem *Modem) Frequency(frequency float64) error {
-	modem.readLock.Add(1)
-	defer modem.readLock.Done()
-
 	cmd := fmt.Sprintf("AT+FREQ=%.2f\n", frequency)
 	if respMsg, cmdErr := modem.sendCmd(cmd); cmdErr != nil {
 		return cmdErr
