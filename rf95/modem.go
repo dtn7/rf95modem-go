@@ -65,6 +65,7 @@ func (modem *Modem) handleRead() {
 	for {
 		select {
 		case <-modem.stopSyn:
+			close(modem.stopAck)
 			return
 
 		default:
