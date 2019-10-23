@@ -20,6 +20,9 @@ func parsePacketRx(msg string) (data []byte, err error) {
 
 // sendCmdMultiline sends an AT command to the rf95modem and reads the amount of requested responding lines.
 func (modem *Modem) sendCmdMultiline(cmd string, respLines int) (responses []string, err error) {
+	modem.cmdLock.Lock()
+	defer modem.cmdLock.Unlock()
+
 	if _, writeErr := modem.serialPort.Write([]byte(cmd)); writeErr != nil {
 		err = writeErr
 		return

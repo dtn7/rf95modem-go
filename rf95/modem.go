@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tarm/serial"
@@ -22,6 +23,7 @@ type Modem struct {
 	device     string
 	serialPort *serial.Port
 	readBuff   *bytes.Buffer
+	cmdLock    sync.Mutex
 	rxQueue    chan string
 	msgQueue   chan string
 	stopSyn    chan struct{}
