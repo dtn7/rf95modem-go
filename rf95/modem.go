@@ -37,7 +37,7 @@ type Modem struct {
 func OpenModem(device string) (modem *Modem, err error) {
 	serialConf := &serial.Config{
 		Name:        device,
-		Baud:        9600,
+		Baud:        115200,
 		ReadTimeout: time.Second,
 	}
 
@@ -115,7 +115,7 @@ func (modem *Modem) Transmit(p []byte) (int, error) {
 		return 0, cmdErr
 	}
 
-	respPattern := regexp.MustCompile(`^\+SENT (\d+) bytes\.\r\n$`)
+	respPattern := regexp.MustCompile(`^\+SENT (\d+) bytes\.\r?\n$`)
 	respMatch := respPattern.FindStringSubmatch(respMsg)
 	if len(respMatch) != 2 {
 		return 0, fmt.Errorf("unexpected response: %s", respMsg)

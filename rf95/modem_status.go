@@ -41,11 +41,12 @@ func (modem *Modem) FetchStatus() (status Status, err error) {
 	}
 
 	for _, respMsg := range respMsgs {
-		if respMsg == "status info:\r\n" || respMsg == "\r\n" {
+		respMsgFilter := regexp.MustCompile(`^(status info:|)\r?\n$`)
+		if respMsgFilter.MatchString(respMsg) {
 			continue
 		}
 
-		splitRegexp := regexp.MustCompile(`^(.+):[ ]+(.+)\r\n$`)
+		splitRegexp := regexp.MustCompile(`^(.+):[ ]+([^\r]+)\r?\n$`)
 		fields := splitRegexp.FindStringSubmatch(respMsg)
 		if len(fields) != 3 {
 			err = fmt.Errorf("non-empty info line does not satisfy regexp: %s", respMsg)
