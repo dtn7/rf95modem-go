@@ -35,6 +35,12 @@ func main() {
 		panic(modemErr)
 	}
 
+	if status, statusErr := modem.FetchStatus(); statusErr != nil {
+		panic(statusErr)
+	} else {
+		fmt.Printf("Starting modem with %v\n", status)
+	}
+
 	ptyMaster, ptySlave, ptyErr := pty()
 	if ptyErr != nil {
 		panic(ptyErr)
