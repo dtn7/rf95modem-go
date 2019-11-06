@@ -34,14 +34,14 @@ func (status Status) String() string {
 
 // FetchStatus queries the rf95modem's status information.
 func (modem *Modem) FetchStatus() (status Status, err error) {
-	respMsgs, cmdErr := modem.sendCmdMultiline("AT+INFO\n", 11)
+	respMsgs, cmdErr := modem.sendCmdMultiline("AT+INFO\n", 12)
 	if cmdErr != nil {
 		err = cmdErr
 		return
 	}
 
 	for _, respMsg := range respMsgs {
-		respMsgFilter := regexp.MustCompile(`^(status info:|)\r?\n$`)
+		respMsgFilter := regexp.MustCompile(`^(\+STATUS:|\+OK|)\r?\n$`)
 		if respMsgFilter.MatchString(respMsg) {
 			continue
 		}
@@ -58,17 +58,15 @@ func (modem *Modem) FetchStatus() (status Status, err error) {
 			status.Firmware = value
 
 		case "modem config":
-			switch value {
-			case "medium range":
-				status.Mode = MediumRange
-			case "slow+long range":
-				// This can be both SlowLongRange or SlowLongRange2..
-				status.Mode = SlowLongRange
-			case "fast+short range":
-				status.Mode = FastShortRange
-			default:
-				err = fmt.Errorf("unknown modem config: %s", value)
+			cfgRegexp := regexp.MustCompile(`^(\d+) .*`)
+			if cfgFields := cfgRegexp.FindStringSubmatch(value); len(cfgFields) != 2 {
+				err = fmt.Errorf("failed to extract momdem config from %s", value)
 				return
+			} else if cfgModeInt, cfgModeIntErr := strconv.Atoi(cfgFields[1]); cfgModeIntErr != nil {
+				err = cfgModeIntErr
+				return
+			} else {
+				status.Mode = ModemMode(cfgModeInt)
 			}
 
 		case "frequency":

@@ -6,7 +6,8 @@
 Golang library to send and receive data over LoRa via a serial connection to
 a [rf95modem].
 
-This library was tested against the rf95modem commit [`c567679`][rf95modem-commit].
+This library was tested against the rf95modem commit [`adf7313`][rf95modem-commit],
+informally version 0.4.
 
 
 ## Library
@@ -81,5 +82,5 @@ $ st -l /dev/pts/7
 
 [godoc]: https://godoc.org/github.com/dtn7/rf95modem-go/rf95
 [rf95modem]: https://github.com/gh0st42/rf95modem 
-[rf95modem-commit]: https://github.com/gh0st42/rf95modem/commit/c567679ba43328914aa2495ce6338ad540547c3a
+[rf95modem-commit]: https://github.com/gh0st42/rf95modem/commit/adf7313c59082e93e8a065b220e5bcf8cc567fca
 [travis]: https://travis-ci.org/dtn7/rf95modem-go

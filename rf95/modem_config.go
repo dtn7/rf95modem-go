@@ -27,7 +27,7 @@ func (modem *Modem) Mode(mode ModemMode) error {
 	cmd := fmt.Sprintf("AT+MODE=%d\n", mode)
 	if respMsg, cmdErr := modem.sendCmd(cmd); cmdErr != nil {
 		return cmdErr
-	} else if !strings.HasPrefix(respMsg, "+ Ok.") {
+	} else if !strings.HasPrefix(respMsg, "+OK") {
 		return fmt.Errorf("changing modem mode returned unexpected response: %s", respMsg)
 	} else {
 		return modem.updateMtu()
@@ -39,7 +39,7 @@ func (modem *Modem) Frequency(frequency float64) error {
 	cmd := fmt.Sprintf("AT+FREQ=%.2f\n", frequency)
 	if respMsg, cmdErr := modem.sendCmd(cmd); cmdErr != nil {
 		return cmdErr
-	} else if !strings.HasPrefix(respMsg, "Set Freq to: ") {
+	} else if !strings.HasPrefix(respMsg, "+FREQ: ") {
 		return fmt.Errorf("changing frequency returned unexpected response: %s", respMsg)
 	} else {
 		return modem.updateMtu()
