@@ -23,7 +23,7 @@ func (modem *Modem) sendCmdMultiline(cmd string, respLines int) (responses []str
 	modem.cmdLock.Lock()
 	defer modem.cmdLock.Unlock()
 
-	if _, writeErr := modem.serialPort.Write([]byte(cmd)); writeErr != nil {
+	if _, writeErr := modem.devWriter.Write([]byte(cmd)); writeErr != nil {
 		err = writeErr
 		return
 	}

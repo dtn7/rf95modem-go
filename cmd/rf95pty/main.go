@@ -30,7 +30,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	modem, modemErr := rf95.OpenModem(os.Args[1])
+	modem, modemErr := rf95.OpenSerial(os.Args[1])
 	if modemErr != nil {
 		panic(modemErr)
 	}

@@ -20,21 +20,37 @@ import (
 // Modem is a software library around the connection to a rf95modem. Thus, a Modem might receive and
 // transmit data via LoRa. Furthermore, both Reader and Writer are implemented.
 type Modem struct {
-	device     string
-	serialPort *serial.Port
-	readBuff   *bytes.Buffer
-	cmdLock    sync.Mutex
-	rxQueue    chan string
-	msgQueue   chan string
-	stopSyn    chan struct{}
-	stopAck    chan struct{}
-	mtu        int
+	devReader io.Reader
+	devWriter io.Writer
+	devCloser io.Closer
+	readBuff  *bytes.Buffer
+	cmdLock   sync.Mutex
+	rxQueue   chan string
+	msgQueue  chan string
+	stopSyn   chan struct{}
+	stopAck   chan struct{}
+	mtu       int
 }
 
-// OpenModem tries to create a new Modem for a given device. This device must be a serial connection with
-// a rf95modem being active on the other side. Possible parameters might be /dev/ttyUSB0, or your operating
-// system's equivalent.
-func OpenModem(device string) (modem *Modem, err error) {
+// OpenModem creates a new Modem, connected to a Reader and a Writer. The Closer might be nil.
+func OpenModem(r io.Reader, w io.Writer, c io.Closer) (modem *Modem, err error) {
+	modem = &Modem{
+		devReader: r,
+		devWriter: w,
+		readBuff:  new(bytes.Buffer),
+		rxQueue:   make(chan string, 32),
+		msgQueue:  make(chan string, 32),
+		stopSyn:   make(chan struct{}),
+		stopAck:   make(chan struct{}),
+	}
+
+	go modem.handleRead()
+	return
+}
+
+// OpenSerial creates a new Modem from a serial connection to a rf95modem. The device parameter might be
+// /dev/ttyUSB0, or your operating system's equivalent.
+func OpenSerial(device string) (modem *Modem, err error) {
 	serialConf := &serial.Config{
 		Name:        device,
 		Baud:        115200,
@@ -47,23 +63,12 @@ func OpenModem(device string) (modem *Modem, err error) {
 		return
 	}
 
-	modem = &Modem{
-		device:     device,
-		serialPort: serialPort,
-		readBuff:   new(bytes.Buffer),
-		rxQueue:    make(chan string, 32),
-		msgQueue:   make(chan string, 32),
-		stopSyn:    make(chan struct{}),
-		stopAck:    make(chan struct{}),
-	}
-
-	go modem.handleRead()
-	return
+	return OpenModem(serialPort, serialPort, serialPort)
 }
 
 // handleRead dispatches the inbounding data to the rxQueue for received messages and msgQueue for everything else.
 func (modem *Modem) handleRead() {
-	var reader = bufio.NewReader(modem.serialPort)
+	var reader = bufio.NewReader(modem.devReader)
 	for {
 		select {
 		case <-modem.stopSyn:
@@ -151,9 +156,12 @@ func (modem *Modem) Write(p []byte) (n int, err error) {
 }
 
 // Close the underlying serial connection.
-func (modem *Modem) Close() error {
+func (modem *Modem) Close() (err error) {
 	close(modem.stopSyn)
 	<-modem.stopAck
 
-	return modem.serialPort.Close()
+	if modem.devCloser != nil {
+		err = modem.devCloser.Close()
+	}
+	return
 }
