@@ -13,6 +13,7 @@ type Status struct {
 	Mode      ModemMode
 	Mtu       int
 	Frequency float64
+	Bfb       int
 	RxBad     int
 	RxGood    int
 	TxGood    int
@@ -25,6 +26,7 @@ func (status Status) String() string {
 	_, _ = fmt.Fprintf(&sb, "mode=%d,", status.Mode)
 	_, _ = fmt.Fprintf(&sb, "mtu=%d,", status.Mtu)
 	_, _ = fmt.Fprintf(&sb, "frequency=%.2f,", status.Frequency)
+	_, _ = fmt.Fprintf(&sb, "big_funky_ble_frames=%d", status.Bfb)
 	_, _ = fmt.Fprintf(&sb, "rx_bad=%d,", status.RxBad)
 	_, _ = fmt.Fprintf(&sb, "rx_good=%d,", status.RxGood)
 	_, _ = fmt.Fprintf(&sb, "tx_good=%d)", status.TxGood)
@@ -34,7 +36,7 @@ func (status Status) String() string {
 
 // FetchStatus queries the rf95modem's status information.
 func (modem *Modem) FetchStatus() (status Status, err error) {
-	respMsgs, cmdErr := modem.sendCmdMultiline("AT+INFO\n", 12)
+	respMsgs, cmdErr := modem.sendCmdMultiline("AT+INFO\n", 13)
 	if cmdErr != nil {
 		err = cmdErr
 		return
@@ -77,7 +79,7 @@ func (modem *Modem) FetchStatus() (status Status, err error) {
 				status.Frequency = freq
 			}
 
-		case "max pkt size", "rx bad", "rx good", "tx good":
+		case "max pkt size", "BFB", "rx bad", "rx good", "tx good":
 			v, vErr := strconv.Atoi(value)
 			if vErr != nil {
 				err = vErr
@@ -86,6 +88,8 @@ func (modem *Modem) FetchStatus() (status Status, err error) {
 			switch fields[1] {
 			case "max pkt size":
 				status.Mtu = v
+			case "bfb":
+				status.Bfb = v
 			case "rx bad":
 				status.RxBad = v
 			case "rx good":
