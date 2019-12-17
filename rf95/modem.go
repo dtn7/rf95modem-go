@@ -101,14 +101,19 @@ func (modem *Modem) Read(p []byte) (int, error) {
 		return modem.readBuff.Read(p)
 	}
 
-	lineMsg := <-modem.rxQueue
-	rxBytes, rxErr := parsePacketRx(lineMsg)
-	if rxErr != nil {
-		return 0, rxErr
-	}
+	select {
+	case <-modem.stopSyn:
+		return 0, io.EOF
 
-	_, _ = modem.readBuff.Write(rxBytes)
-	return modem.readBuff.Read(p)
+	case lineMsg := <-modem.rxQueue:
+		rxBytes, rxErr := parsePacketRx(lineMsg)
+		if rxErr != nil {
+			return 0, rxErr
+		}
+
+		_, _ = modem.readBuff.Write(rxBytes)
+		return modem.readBuff.Read(p)
+	}
 }
 
 // Transmit the byte array whose length must be shorter than the Mtu. To transfer a byte array regardless

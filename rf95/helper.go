@@ -3,6 +3,7 @@ package rf95
 import (
 	"encoding/hex"
 	"fmt"
+	"io"
 	"regexp"
 )
 
@@ -23,13 +24,19 @@ func (modem *Modem) sendCmdMultiline(cmd string, respLines int) (responses []str
 	modem.cmdLock.Lock()
 	defer modem.cmdLock.Unlock()
 
-	if _, writeErr := modem.devWriter.Write([]byte(cmd)); writeErr != nil {
-		err = writeErr
-		return
-	}
+	select {
+	case <-modem.stopSyn:
+		err = io.EOF
 
-	for i := 0; i < respLines; i++ {
-		responses = append(responses, <-modem.msgQueue)
+	default:
+		if _, writeErr := modem.devWriter.Write([]byte(cmd)); writeErr != nil {
+			err = writeErr
+			return
+		}
+
+		for i := 0; i < respLines; i++ {
+			responses = append(responses, <-modem.msgQueue)
+		}
 	}
 
 	return
