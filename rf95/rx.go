@@ -33,3 +33,13 @@ func parsePacketRx(msg string) (rx RxMessage, err error) {
 
 	return
 }
+
+// rxHandler is the RX message handler for the io.Reader.
+func (modem *Modem) rxHandler(rx RxMessage) {
+	modem.rxQueue <- rx
+}
+
+// RegisterRxHandler calls the handler function for each incoming RX message.
+func (modem *Modem) RegisterRxHandler(handler func(RxMessage)) {
+	modem.rxHandlers = append(modem.rxHandlers, handler)
+}

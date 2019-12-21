@@ -20,16 +20,17 @@ import (
 // Modem is a software library around the connection to a rf95modem. Thus, a Modem might receive and
 // transmit data via LoRa. Furthermore, both Reader and Writer are implemented.
 type Modem struct {
-	devReader io.Reader
-	devWriter io.Writer
-	devCloser io.Closer
-	readBuff  *bytes.Buffer
-	cmdLock   sync.Mutex
-	rxQueue   chan string
-	msgQueue  chan string
-	stopSyn   chan struct{}
-	stopAck   chan struct{}
-	mtu       int
+	devReader  io.Reader
+	devWriter  io.Writer
+	devCloser  io.Closer
+	readBuff   *bytes.Buffer
+	cmdLock    sync.Mutex
+	rxHandlers []func(RxMessage)
+	rxQueue    chan RxMessage
+	msgQueue   chan string
+	stopSyn    chan struct{}
+	stopAck    chan struct{}
+	mtu        int
 }
 
 // OpenModem creates a new Modem, connected to a Reader and a Writer. The Closer might be nil.
@@ -39,13 +40,15 @@ func OpenModem(r io.Reader, w io.Writer, c io.Closer) (modem *Modem, err error) 
 		devWriter: w,
 		devCloser: c,
 		readBuff:  new(bytes.Buffer),
-		rxQueue:   make(chan string, 32),
+		rxQueue:   make(chan RxMessage, 32),
 		msgQueue:  make(chan string, 32),
 		stopSyn:   make(chan struct{}),
 		stopAck:   make(chan struct{}),
 	}
 
+	modem.RegisterRxHandler(modem.rxHandler)
 	go modem.handleRead()
+
 	return
 }
 
@@ -85,7 +88,11 @@ func (modem *Modem) handleRead() {
 			}
 
 			if strings.HasPrefix(lineMsg, "+RX") {
-				modem.rxQueue <- lineMsg
+				if rxMsg, rxErr := parsePacketRx(lineMsg); rxErr == nil {
+					for _, h := range modem.rxHandlers {
+						h(rxMsg)
+					}
+				}
 			} else {
 				modem.msgQueue <- lineMsg
 			}
@@ -106,13 +113,8 @@ func (modem *Modem) Read(p []byte) (int, error) {
 	case <-modem.stopSyn:
 		return 0, io.EOF
 
-	case lineMsg := <-modem.rxQueue:
-		rxBytes, rxErr := parsePacketRx(lineMsg)
-		if rxErr != nil {
-			return 0, rxErr
-		}
-
-		_, _ = modem.readBuff.Write(rxBytes.Payload)
+	case rxMsg := <-modem.rxQueue:
+		_, _ = modem.readBuff.Write(rxMsg.Payload)
 		return modem.readBuff.Read(p)
 	}
 }
@@ -169,5 +171,8 @@ func (modem *Modem) Close() (err error) {
 	if modem.devCloser != nil {
 		err = modem.devCloser.Close()
 	}
+
+	modem.rxHandlers = nil
+
 	return
 }
