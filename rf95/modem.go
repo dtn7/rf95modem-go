@@ -112,7 +112,7 @@ func (modem *Modem) Read(p []byte) (int, error) {
 			return 0, rxErr
 		}
 
-		_, _ = modem.readBuff.Write(rxBytes)
+		_, _ = modem.readBuff.Write(rxBytes.Payload)
 		return modem.readBuff.Read(p)
 	}
 }
