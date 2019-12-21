@@ -37,6 +37,7 @@ func OpenModem(r io.Reader, w io.Writer, c io.Closer) (modem *Modem, err error) 
 	modem = &Modem{
 		devReader: r,
 		devWriter: w,
+		devCloser: c,
 		readBuff:  new(bytes.Buffer),
 		rxQueue:   make(chan string, 32),
 		msgQueue:  make(chan string, 32),
