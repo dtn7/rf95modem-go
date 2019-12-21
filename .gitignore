@@ -130,3 +130,6 @@ tags
 [._]*.un~
 
 # End of https://www.gitignore.io/api/go,vim,jetbrains+all
+
+rf95logger
+rf95pty

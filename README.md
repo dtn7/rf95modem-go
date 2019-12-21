@@ -13,9 +13,10 @@ informally version 0.5.1.
 ## Library
 
 The primary focus of this library is the sending and receiving of data via
-LoRa. An `io.Reader` and `io.Writer` are provided for this purpose. Furthermore,
-both frequency and modem mode can be changed. For more information take a look
-at the [documentation][godoc].
+LoRa. An `io.Reader` and `io.Writer` are provided for this purpose. It is also
+possible to register handler functions for incoming messages. Furthermore, both
+frequency and modem mode can be changed. For more information take a look at
+the [documentation][godoc].
 
 ```go
 package main
@@ -27,7 +28,7 @@ import (
 )
 
 func main() {
-	modem, modemErr := rf95.OpenModem("/dev/ttyUSB0")
+	modem, modemErr := rf95.OpenSerial("/dev/ttyUSB0")
 	if modemErr != nil {
 		panic(modemErr)
 	}
@@ -50,7 +51,21 @@ func main() {
 ```
 
 
-##  Example: rf95pty
+## Example: rf95logger
+
+A simple logger script for incoming messages with their RSSI and SNR.
+
+```
+$ go build ./cmd/rf95logger
+```
+
+```
+# Logging messages from /dev/ttyUSB0 at 868.1 MHz on mode 1, fast+short range
+$ ./rf95logger /dev/ttyUSB0 868.1 1 | tee loralog.csv
+```
+
+
+## Example: rf95pty
 
 A small proof of concept is `rf95pty` to bind a [rf95modem] to a new pseudoterminal
 device. This code should work for POSIX operating systems.
@@ -76,7 +91,7 @@ $ ./rf95pty /dev/ttyUSB1
 Starting modem with Status(...)
 Opening pty device /dev/pts/7
 
-$ st -l /dev/pts/7
+$ screen /dev/pts/7
 ```
 
 
