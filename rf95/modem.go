@@ -26,7 +26,6 @@ type Modem struct {
 	readBuff   *bytes.Buffer
 	cmdLock    sync.Mutex
 	rxHandlers []func(RxMessage)
-	rxQueue    chan RxMessage
 	msgQueue   chan string
 	stopSyn    chan struct{}
 	stopAck    chan struct{}
@@ -40,8 +39,7 @@ func OpenModem(r io.Reader, w io.Writer, c io.Closer) (modem *Modem, err error) 
 		devWriter: w,
 		devCloser: c,
 		readBuff:  new(bytes.Buffer),
-		rxQueue:   make(chan RxMessage, 32),
-		msgQueue:  make(chan string, 32),
+		msgQueue:  make(chan string, 128),
 		stopSyn:   make(chan struct{}),
 		stopAck:   make(chan struct{}),
 	}
@@ -109,13 +107,17 @@ func (modem *Modem) Read(p []byte) (int, error) {
 		return modem.readBuff.Read(p)
 	}
 
-	select {
-	case <-modem.stopSyn:
-		return 0, io.EOF
+	for {
+		select {
+		case <-modem.stopSyn:
+			return 0, io.EOF
 
-	case rxMsg := <-modem.rxQueue:
-		_, _ = modem.readBuff.Write(rxMsg.Payload)
-		return modem.readBuff.Read(p)
+		default:
+			if modem.readBuff.Len() > 0 {
+				return modem.readBuff.Read(p)
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
 	}
 }
 
