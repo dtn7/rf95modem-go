@@ -22,13 +22,14 @@ the [documentation][godoc].
 package main
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/dtn7/rf95modem-go/rf95"
 )
 
 func main() {
-	modem, modemErr := rf95.OpenSerial("/dev/ttyUSB0")
+	modem, modemErr := rf95.OpenSerial("/dev/ttyUSB0", context.Background())
 	if modemErr != nil {
 		panic(modemErr)
 	}
@@ -40,9 +41,8 @@ func main() {
 	buf := make([]byte, 64)
 	if _, err := modem.Read(buf); err != nil {
 		panic(err)
-	} else {
-		fmt.Printf("%x\n", buf)
 	}
+	fmt.Printf("%x\n", buf)
 
 	if err := modem.Close(); err != nil {
 		panic(err)

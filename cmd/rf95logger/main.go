@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
@@ -9,21 +10,6 @@ import (
 
 	"github.com/dtn7/rf95modem-go/rf95"
 )
-
-// waitSigint blocks the current thread until a SIGINT appears.
-func waitSigint() {
-	signalSyn := make(chan os.Signal)
-	signalAck := make(chan struct{})
-
-	signal.Notify(signalSyn, os.Interrupt)
-
-	go func() {
-		<-signalSyn
-		close(signalAck)
-	}()
-
-	<-signalAck
-}
 
 // handler prints the received message with its RSSI and SNR as a CSV on the stdout.
 func handler(rx rf95.RxMessage) {
@@ -37,7 +23,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	modem, modemErr := rf95.OpenSerial(os.Args[1])
+	sigintCtx, sigintCtxCancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer sigintCtxCancel()
+
+	modem, modemErr := rf95.OpenSerial(os.Args[1], sigintCtx)
 	if modemErr != nil {
 		panic(modemErr)
 	}
@@ -57,7 +46,7 @@ func main() {
 	fmt.Println("unix_nanosec,payload,rssi,snr")
 	modem.RegisterRxHandler(handler)
 
-	waitSigint()
+	<-sigintCtx.Done()
 
 	if closeErr := modem.Close(); closeErr != nil {
 		panic(closeErr)

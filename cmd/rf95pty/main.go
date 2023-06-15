@@ -1,27 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
 
 	"github.com/dtn7/rf95modem-go/rf95"
 )
-
-// waitSigint blocks the current thread until a SIGINT appears.
-func waitSigint() {
-	signalSyn := make(chan os.Signal)
-	signalAck := make(chan struct{})
-
-	signal.Notify(signalSyn, os.Interrupt)
-
-	go func() {
-		<-signalSyn
-		close(signalAck)
-	}()
-
-	<-signalAck
-}
 
 func main() {
 	if len(os.Args) != 2 {
@@ -30,7 +16,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	modem, modemErr := rf95.OpenSerial(os.Args[1])
+	sigintCtx, sigintCtxCancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer sigintCtxCancel()
+
+	modem, modemErr := rf95.OpenSerial(os.Args[1], sigintCtx)
 	if modemErr != nil {
 		panic(modemErr)
 	}
@@ -51,7 +40,7 @@ func main() {
 	go streamCopy(modem, ptyMaster)
 	go streamCopy(ptyMaster, modem)
 
-	waitSigint()
+	<-sigintCtx.Done()
 
 	if err := modem.Close(); err != nil {
 		fmt.Printf("Closing errored: %v\n", err)

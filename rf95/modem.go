@@ -5,6 +5,7 @@ package rf95
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -68,7 +69,7 @@ func (status Status) String() string {
 	_, _ = fmt.Fprintf(&sb, "mode=%d,", status.Mode)
 	_, _ = fmt.Fprintf(&sb, "mtu=%d,", status.Mtu)
 	_, _ = fmt.Fprintf(&sb, "frequency=%.2f,", status.Frequency)
-	_, _ = fmt.Fprintf(&sb, "big_funky_ble_frames=%d", status.Bfb)
+	_, _ = fmt.Fprintf(&sb, "big_funky_ble_frames=%d,", status.Bfb)
 	_, _ = fmt.Fprintf(&sb, "rx_bad=%d,", status.RxBad)
 	_, _ = fmt.Fprintf(&sb, "rx_good=%d,", status.RxGood)
 	_, _ = fmt.Fprintf(&sb, "tx_good=%d)", status.TxGood)
@@ -79,29 +80,31 @@ func (status Status) String() string {
 // Modem is a software library around the connection to a rf95modem. Thus, a Modem might receive and
 // transmit data via LoRa. Furthermore, both Reader and Writer are implemented.
 type Modem struct {
-	devReader  io.Reader
-	devWriter  io.Writer
-	devCloser  io.Closer
+	devReader io.Reader
+	devWriter io.Writer
+	devCloser io.Closer
+
 	readBuff   *bytes.Buffer
 	cmdLock    sync.Mutex
 	rxHandlers []func(RxMessage)
 	msgQueue   chan string
-	stopSyn    chan struct{}
-	stopAck    chan struct{}
 	mtu        int
+
+	ctx       context.Context
+	ctxCancel context.CancelFunc
 }
 
 // OpenModem creates a new Modem, connected to a Reader and a Writer. The Closer might be nil.
-func OpenModem(r io.Reader, w io.Writer, c io.Closer) (modem *Modem, err error) {
+func OpenModem(r io.Reader, w io.Writer, c io.Closer, ctx context.Context) (modem *Modem, err error) {
 	modem = &Modem{
 		devReader: r,
 		devWriter: w,
 		devCloser: c,
 		readBuff:  new(bytes.Buffer),
 		msgQueue:  make(chan string, 128),
-		stopSyn:   make(chan struct{}),
-		stopAck:   make(chan struct{}),
 	}
+
+	modem.ctx, modem.ctxCancel = context.WithCancel(ctx)
 
 	modem.RegisterRxHandler(modem.rxHandler)
 	go modem.handleRead()
@@ -111,7 +114,7 @@ func OpenModem(r io.Reader, w io.Writer, c io.Closer) (modem *Modem, err error) 
 
 // OpenSerial creates a new Modem from a serial connection to a rf95modem. The device parameter might be
 // /dev/ttyUSB0, or your operating system's equivalent.
-func OpenSerial(device string) (modem *Modem, err error) {
+func OpenSerial(device string, ctx context.Context) (modem *Modem, err error) {
 	serialConf := &serial.Config{
 		Name:        device,
 		Baud:        115200,
@@ -124,7 +127,7 @@ func OpenSerial(device string) (modem *Modem, err error) {
 		return
 	}
 
-	return OpenModem(serialPort, serialPort, serialPort)
+	return OpenModem(serialPort, serialPort, serialPort, ctx)
 }
 
 // handleRead dispatches the inbounding data to the rxQueue for received messages and msgQueue for everything else.
@@ -132,8 +135,7 @@ func (modem *Modem) handleRead() {
 	var reader = bufio.NewReader(modem.devReader)
 	for {
 		select {
-		case <-modem.stopSyn:
-			close(modem.stopAck)
+		case <-modem.ctx.Done():
 			return
 
 		default:
@@ -168,7 +170,7 @@ func (modem *Modem) Read(p []byte) (int, error) {
 
 	for {
 		select {
-		case <-modem.stopSyn:
+		case <-modem.ctx.Done():
 			return 0, io.EOF
 
 		default:
@@ -226,8 +228,7 @@ func (modem *Modem) Write(p []byte) (n int, err error) {
 
 // Close the underlying serial connection.
 func (modem *Modem) Close() (err error) {
-	close(modem.stopSyn)
-	<-modem.stopAck
+	modem.ctxCancel()
 
 	if modem.devCloser != nil {
 		err = modem.devCloser.Close()
@@ -298,7 +299,7 @@ func (modem *Modem) sendCmdMultiline(cmd string, respLines int) (responses []str
 	defer modem.cmdLock.Unlock()
 
 	select {
-	case <-modem.stopSyn:
+	case <-modem.ctx.Done():
 		err = io.EOF
 
 	default:
@@ -364,7 +365,7 @@ func (modem *Modem) FetchStatus() (status Status, err error) {
 			return
 		}
 
-		key, value := fields[1], fields[2]
+		key, value := fields[1], strings.TrimSpace(fields[2])
 
 		switch key {
 		case "firmware":

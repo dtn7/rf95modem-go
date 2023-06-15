@@ -6,6 +6,7 @@ The format is based on [Keep a Changelog][keep-a-changelog], and this project ad
 
 ## [Unreleased]
 ### Changed
+- Breaking API changes: `Modem` now uses a `context.Context` which must be passed during creation.
 - Adapted the [Keep a Changelog][keep-a-changelog] format and created a changelog from prior git tags.
 - Changed default branch from `master` to `main`.
 - Bumped dependencies.
