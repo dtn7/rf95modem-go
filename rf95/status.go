@@ -10,6 +10,7 @@ import (
 // Status describes the rf95modem's status, acquired by AT+INFO.
 type Status struct {
 	Firmware  string
+	Features  []string
 	Mode      ModemMode
 	Mtu       int
 	Frequency float64
@@ -23,6 +24,7 @@ func (status Status) String() string {
 	var sb strings.Builder
 
 	_, _ = fmt.Fprint(&sb, "Status(", "firmware=", status.Firmware, ",")
+	_, _ = fmt.Fprintf(&sb, "features=%s,", strings.Join(status.Features, ","))
 	_, _ = fmt.Fprintf(&sb, "mode=%d,", status.Mode)
 	_, _ = fmt.Fprintf(&sb, "mtu=%d,", status.Mtu)
 	_, _ = fmt.Fprintf(&sb, "frequency=%.2f,", status.Frequency)
@@ -36,6 +38,12 @@ func (status Status) String() string {
 
 // FetchStatus queries the rf95modem's status information.
 func (modem *Modem) FetchStatus() (status Status, err error) {
+	defer func() {
+		if err != nil {
+			status = Status{}
+		}
+	}()
+
 	respMsgs, cmdErr := modem.sendCmdMultiline("AT+INFO\n", 13)
 	if cmdErr != nil {
 		err = cmdErr
@@ -55,9 +63,17 @@ func (modem *Modem) FetchStatus() (status Status, err error) {
 			return
 		}
 
-		switch value := fields[2]; fields[1] {
+		key, value := fields[1], fields[2]
+
+		switch key {
 		case "firmware":
 			status.Firmware = value
+
+		case "features":
+			status.Features = strings.Split(value, " ")
+			for i := 0; i < len(status.Features); i++ {
+				status.Features[i] = strings.TrimSpace(status.Features[i])
+			}
 
 		case "modem config":
 			cfgRegexp := regexp.MustCompile(`^(\d+) .*`)
@@ -66,6 +82,9 @@ func (modem *Modem) FetchStatus() (status Status, err error) {
 				return
 			} else if cfgModeInt, cfgModeIntErr := strconv.Atoi(cfgFields[1]); cfgModeIntErr != nil {
 				err = cfgModeIntErr
+				return
+			} else if cfgModeInt < 0 || cfgModeInt > maxModemMode {
+				err = fmt.Errorf("modem config %d is not in [0, %d]", cfgModeInt, maxModemMode)
 				return
 			} else {
 				status.Mode = ModemMode(cfgModeInt)
@@ -85,10 +104,10 @@ func (modem *Modem) FetchStatus() (status Status, err error) {
 				err = vErr
 			}
 
-			switch fields[1] {
+			switch key {
 			case "max pkt size":
 				status.Mtu = v
-			case "bfb":
+			case "BFB":
 				status.Bfb = v
 			case "rx bad":
 				status.RxBad = v
@@ -98,11 +117,11 @@ func (modem *Modem) FetchStatus() (status Status, err error) {
 				status.TxGood = v
 			}
 
-		case "rx listener":
-			// We don't care about this one.
+		case "rx listener", "GPS":
+			// We don't care about those.
 
 		default:
-			err = fmt.Errorf("unknown info key value: %s", fields[1])
+			err = fmt.Errorf("unknown info key value: %s", key)
 			return
 		}
 	}

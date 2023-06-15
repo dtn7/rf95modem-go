@@ -20,6 +20,12 @@ const (
 
 	// SlowLongRange2 is another slow and long range mode. Bw = 125 kHz, Cr = 4/8, Sf = 4096chips/symbol, CRC on.
 	SlowLongRange2 ModemMode = 3
+
+	// SlowLongRange3 is another slow and long range mode. Bw = 125 kHz, Cr = 4/5, Sf = 2048chips/symbol, CRC on.
+	SlowLongRange3 ModemMode = 4
+
+	// maxModemMode holds the greatest integer of a known ModemMode used for range checks.
+	maxModemMode = int(SlowLongRange3)
 )
 
 // Mode sets the rf95modem's modem config.
