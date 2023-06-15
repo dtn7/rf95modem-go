@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog][keep-a-changelog], and this project ad
 ### Changed
 - Adapted the [Keep a Changelog][keep-a-changelog] format and created a changelog from prior git tags.
 - Changed default branch from `master` to `main`.
+- Bumped dependencies.
 
 ### Fixed
 - Restored compatibility with rf95modem upstream code, version 0.7.3 including later commits.
