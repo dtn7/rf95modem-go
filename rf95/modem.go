@@ -17,6 +17,65 @@ import (
 	"github.com/tarm/serial"
 )
 
+// ModemMode is the rf95modem's config mode, as specified by AT+MODE.
+type ModemMode int
+
+const (
+	// MediumRange is the default mode for medium range. Bw = 125 kHz, Cr = 4/5, Sf = 128chips/symbol, CRC on.
+	MediumRange ModemMode = 0
+
+	// FastShortRange is a fast and short range mode. Bw = 500 kHz, Cr = 4/5, Sf = 128chips/symbol, CRC on.
+	FastShortRange ModemMode = 1
+
+	// SlowLongRange is a slow and long range mode. Bw = 31.25 kHz, Cr = 4/8, Sf = 512chips/symbol, CRC on.
+	SlowLongRange ModemMode = 2
+
+	// SlowLongRange2 is another slow and long range mode. Bw = 125 kHz, Cr = 4/8, Sf = 4096chips/symbol, CRC on.
+	SlowLongRange2 ModemMode = 3
+
+	// SlowLongRange3 is another slow and long range mode. Bw = 125 kHz, Cr = 4/5, Sf = 2048chips/symbol, CRC on.
+	SlowLongRange3 ModemMode = 4
+
+	// maxModemMode holds the greatest integer of a known ModemMode used for range checks.
+	maxModemMode = int(SlowLongRange3)
+)
+
+// RxMessage represents an incoming RX message with its fields from the rf95modem.
+type RxMessage struct {
+	Payload []byte
+	Rssi    int
+	Snr     int
+}
+
+// Status describes the rf95modem's status, acquired by AT+INFO.
+type Status struct {
+	Firmware  string
+	Features  []string
+	Mode      ModemMode
+	Mtu       int
+	Frequency float64
+	Bfb       int
+	RxBad     int
+	RxGood    int
+	TxGood    int
+}
+
+func (status Status) String() string {
+	var sb strings.Builder
+
+	_, _ = fmt.Fprint(&sb, "Status(", "firmware=", status.Firmware, ",")
+	_, _ = fmt.Fprintf(&sb, "features=%s,", strings.Join(status.Features, ","))
+	_, _ = fmt.Fprintf(&sb, "mode=%d,", status.Mode)
+	_, _ = fmt.Fprintf(&sb, "mtu=%d,", status.Mtu)
+	_, _ = fmt.Fprintf(&sb, "frequency=%.2f,", status.Frequency)
+	_, _ = fmt.Fprintf(&sb, "big_funky_ble_frames=%d", status.Bfb)
+	_, _ = fmt.Fprintf(&sb, "rx_bad=%d,", status.RxBad)
+	_, _ = fmt.Fprintf(&sb, "rx_good=%d,", status.RxGood)
+	_, _ = fmt.Fprintf(&sb, "tx_good=%d)", status.TxGood)
+
+	return sb.String()
+}
+
 // Modem is a software library around the connection to a rf95modem. Thus, a Modem might receive and
 // transmit data via LoRa. Furthermore, both Reader and Writer are implemented.
 type Modem struct {
@@ -176,5 +235,210 @@ func (modem *Modem) Close() (err error) {
 
 	modem.rxHandlers = nil
 
+	return
+}
+
+// Mode sets the rf95modem's modem config.
+func (modem *Modem) Mode(mode ModemMode) error {
+	cmd := fmt.Sprintf("AT+MODE=%d\n", mode)
+	if respMsg, cmdErr := modem.sendCmd(cmd); cmdErr != nil {
+		return cmdErr
+	} else if !strings.HasPrefix(respMsg, "+OK") {
+		return fmt.Errorf("changing modem mode returned unexpected response: %s", respMsg)
+	} else {
+		return modem.updateMtu()
+	}
+}
+
+// Frequency changes the rf95modem's frequency, specified in MHz.
+func (modem *Modem) Frequency(frequency float64) error {
+	cmd := fmt.Sprintf("AT+FREQ=%.2f\n", frequency)
+	if respMsg, cmdErr := modem.sendCmd(cmd); cmdErr != nil {
+		return cmdErr
+	} else if !strings.HasPrefix(respMsg, "+FREQ: ") {
+		return fmt.Errorf("changing frequency returned unexpected response: %s", respMsg)
+	} else {
+		return modem.updateMtu()
+	}
+}
+
+// parsePacketRx tries to extract the fields of an RX message.
+func parsePacketRx(msg string) (rx RxMessage, err error) {
+	rxRegexp := regexp.MustCompile(`^\+RX \d+,([0-9A-Fa-f]+),([-0-9]+),([-0-9]+)\r?\n$`)
+	findings := rxRegexp.FindStringSubmatch(msg)
+	if len(findings) != 4 {
+		err = fmt.Errorf("found no matching RX fields")
+		return
+	}
+
+	if rx.Payload, err = hex.DecodeString(findings[1]); err != nil {
+		return
+	} else if rx.Rssi, err = strconv.Atoi(findings[2]); err != nil {
+		return
+	} else if rx.Snr, err = strconv.Atoi(findings[3]); err != nil {
+		return
+	}
+
+	return
+}
+
+// rxHandler is the RX message handler for the io.Reader.
+func (modem *Modem) rxHandler(rx RxMessage) {
+	_, _ = modem.readBuff.Write(rx.Payload)
+}
+
+// RegisterRxHandler calls the handler function for each incoming RX message.
+func (modem *Modem) RegisterRxHandler(handler func(RxMessage)) {
+	modem.rxHandlers = append(modem.rxHandlers, handler)
+}
+
+// sendCmdMultiline sends an AT command to the rf95modem and reads the amount of requested responding lines.
+func (modem *Modem) sendCmdMultiline(cmd string, respLines int) (responses []string, err error) {
+	modem.cmdLock.Lock()
+	defer modem.cmdLock.Unlock()
+
+	select {
+	case <-modem.stopSyn:
+		err = io.EOF
+
+	default:
+		if _, writeErr := modem.devWriter.Write([]byte(cmd)); writeErr != nil {
+			err = writeErr
+			return
+		}
+
+		for i := 0; i < respLines; i++ {
+			responses = append(responses, <-modem.msgQueue)
+		}
+	}
+
+	return
+}
+
+// sendCmd sends an AT command to the rf95modem and reads the responding line.
+func (modem *Modem) sendCmd(cmd string) (response string, err error) {
+	if responses, responsesErr := modem.sendCmdMultiline(cmd, 1); responsesErr != nil {
+		err = responsesErr
+	} else {
+		response = responses[0]
+	}
+
+	return
+}
+
+// updateMtu fetches the current MTU.
+func (modem *Modem) updateMtu() (err error) {
+	if status, statusErr := modem.FetchStatus(); statusErr != nil {
+		err = statusErr
+	} else {
+		modem.mtu = status.Mtu
+	}
+
+	return
+}
+
+// FetchStatus queries the rf95modem's status information.
+func (modem *Modem) FetchStatus() (status Status, err error) {
+	defer func() {
+		if err != nil {
+			status = Status{}
+		}
+	}()
+
+	respMsgs, cmdErr := modem.sendCmdMultiline("AT+INFO\n", 13)
+	if cmdErr != nil {
+		err = cmdErr
+		return
+	}
+
+	for _, respMsg := range respMsgs {
+		respMsgFilter := regexp.MustCompile(`^(\+STATUS:|\+OK|)\r?\n$`)
+		if respMsgFilter.MatchString(respMsg) {
+			continue
+		}
+
+		splitRegexp := regexp.MustCompile(`^(.+):[ ]+([^\r]+)\r?\n$`)
+		fields := splitRegexp.FindStringSubmatch(respMsg)
+		if len(fields) != 3 {
+			err = fmt.Errorf("non-empty info line does not satisfy regexp: %s", respMsg)
+			return
+		}
+
+		key, value := fields[1], fields[2]
+
+		switch key {
+		case "firmware":
+			status.Firmware = value
+
+		case "features":
+			status.Features = strings.Split(value, " ")
+			for i := 0; i < len(status.Features); i++ {
+				status.Features[i] = strings.TrimSpace(status.Features[i])
+			}
+
+		case "modem config":
+			cfgRegexp := regexp.MustCompile(`^(\d+) .*`)
+			if cfgFields := cfgRegexp.FindStringSubmatch(value); len(cfgFields) != 2 {
+				err = fmt.Errorf("failed to extract momdem config from %s", value)
+				return
+			} else if cfgModeInt, cfgModeIntErr := strconv.Atoi(cfgFields[1]); cfgModeIntErr != nil {
+				err = cfgModeIntErr
+				return
+			} else if cfgModeInt < 0 || cfgModeInt > maxModemMode {
+				err = fmt.Errorf("modem config %d is not in [0, %d]", cfgModeInt, maxModemMode)
+				return
+			} else {
+				status.Mode = ModemMode(cfgModeInt)
+			}
+
+		case "frequency":
+			if freq, freqErr := strconv.ParseFloat(value, 64); freqErr != nil {
+				err = freqErr
+				return
+			} else {
+				status.Frequency = freq
+			}
+
+		case "max pkt size", "BFB", "rx bad", "rx good", "tx good":
+			v, vErr := strconv.Atoi(value)
+			if vErr != nil {
+				err = vErr
+			}
+
+			switch key {
+			case "max pkt size":
+				status.Mtu = v
+			case "BFB":
+				status.Bfb = v
+			case "rx bad":
+				status.RxBad = v
+			case "rx good":
+				status.RxGood = v
+			case "tx good":
+				status.TxGood = v
+			}
+
+		case "rx listener", "GPS":
+			// We don't care about those.
+
+		default:
+			err = fmt.Errorf("unknown info key value: %s", key)
+			return
+		}
+	}
+
+	return
+}
+
+// Mtu returns the rf95modem's MTU.
+func (modem *Modem) Mtu() (mtu int, err error) {
+	if modem.mtu == 0 {
+		if mtuErr := modem.updateMtu(); mtuErr != nil {
+			err = mtuErr
+			return
+		}
+	}
+
+	mtu = modem.mtu
 	return
 }
