@@ -1,7 +1,7 @@
 # rf95modem-go
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/dtn7/rf95modem-go/rf95.svg)][godoc]
-[![Build Status](https://travis-ci.org/dtn7/rf95modem-go.svg?branch=master)][travis]
+![CI](https://github.com/dtn7/rf95modem-go/workflows/CI/badge.svg)
 
 Golang library to send and receive data over LoRa PHY via a serial connection to a [rf95modem].
 
@@ -168,4 +168,3 @@ $ screen /dev/pts/7
 [rf95modem]: https://github.com/gh0st42/rf95modem
 [rf95modem-commit]: https://github.com/gh0st42/rf95modem/commit/117878a4b609f9488ad8d5176f98067b9e8baa01
 [rf95modem-pr16]: https://github.com/gh0st42/rf95modem/pull/16
-[travis]: https://travis-ci.org/dtn7/rf95modem-go
