@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog][keep-a-changelog], and this project ad
 
 ### Fixed
 - Restored compatibility with rf95modem upstream code, version 0.7.3 including later commits.
+- Allow reading a variable amount of feedback lines back from AT commands; fixes possible multi line bug in `AT+INFO`.
 
 ## [0.3.2] - 2023-02-25
 > _This release was created before adapting the [Keep a Changelog][keep-a-changelog] format._

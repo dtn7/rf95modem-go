@@ -72,8 +72,8 @@ type Modem struct {
 	mtuHandlers  []func(int)
 	handlerMutex sync.RWMutex
 
-	sendCmdMutex sync.Mutex
-	msgQueue     chan string
+	atCommandMutex sync.Mutex
+	msgQueue       chan string
 
 	ctx       context.Context
 	ctxCancel context.CancelFunc
@@ -210,45 +210,48 @@ func (modem *Modem) RegisterHandlers(rxHandler func(RxMessage), mtuHandler func(
 	return modem.ctx, nil
 }
 
-// sendCmdMultiline sends an AT command and reads the amount of requested responding lines.
-func (modem *Modem) sendCmdMultiline(cmd string, respLines int) (responses []string, err error) {
-	modem.sendCmdMutex.Lock()
-	defer modem.sendCmdMutex.Unlock()
+// atCommand executes an AT command and reads lines until stopFn returns false.
+//
+// The last line where stopFn returns false will also be included in lines.
+func (modem *Modem) atCommand(cmd string, stopFn func(string) bool) (lines []string, err error) {
+	modem.atCommandMutex.Lock()
+	defer modem.atCommandMutex.Unlock()
 
-	select {
-	case <-modem.ctx.Done():
-		err = io.EOF
-
-	default:
-		if _, writeErr := modem.devWriter.Write([]byte(cmd)); writeErr != nil {
-			err = writeErr
-			return
-		}
-
-		for i := 0; i < respLines; i++ {
-			responses = append(responses, <-modem.msgQueue)
-		}
+	_, err = modem.devWriter.Write([]byte(cmd + "\n"))
+	if err != nil {
+		return
 	}
 
-	return
+	for {
+		select {
+		case <-modem.ctx.Done():
+			err = io.EOF
+			return
+
+		case line := <-modem.msgQueue:
+			lines = append(lines, line)
+			if !stopFn(line) {
+				return
+			}
+		}
+	}
 }
 
-// sendCmd sends an AT command and reads the responding line.
-func (modem *Modem) sendCmd(cmd string) (response string, err error) {
-	if responses, responsesErr := modem.sendCmdMultiline(cmd, 1); responsesErr != nil {
-		err = responsesErr
-	} else {
-		response = responses[0]
+// atCommandOnce executes an AT command and reads back one line.
+func (modem *Modem) atCommandOnce(cmd string) (string, error) {
+	lines, err := modem.atCommand(cmd, func(string) bool { return false })
+	if err != nil {
+		return "", err
 	}
 
-	return
+	return lines[0], nil
 }
 
 // Transmit the byte array whose length must be shorter than the Mtu.
 //
 // To transfer a byte array regardless of its length, create a Stream.
 func (modem *Modem) Transmit(p []byte) (int, error) {
-	respMsg, cmdErr := modem.sendCmd(fmt.Sprintf("AT+TX=%s\n", hex.EncodeToString(p)))
+	respMsg, cmdErr := modem.atCommandOnce(fmt.Sprintf("AT+TX=%s", hex.EncodeToString(p)))
 	if cmdErr != nil {
 		return 0, cmdErr
 	}
@@ -286,7 +289,7 @@ func (modem *Modem) Mode(mode ModemMode) error {
 		return fmt.Errorf("modem mode %d is not in [0, %d]", mode, maxModemMode)
 	}
 
-	respMsg, cmdErr := modem.sendCmd(fmt.Sprintf("AT+MODE=%d\n", mode))
+	respMsg, cmdErr := modem.atCommandOnce(fmt.Sprintf("AT+MODE=%d", mode))
 	if cmdErr != nil {
 		return cmdErr
 	}
@@ -299,7 +302,7 @@ func (modem *Modem) Mode(mode ModemMode) error {
 
 // Frequency changes the frequency specified in MHz.
 func (modem *Modem) Frequency(frequency float64) error {
-	respMsg, cmdErr := modem.sendCmd(fmt.Sprintf("AT+FREQ=%.2f\n", frequency))
+	respMsg, cmdErr := modem.atCommandOnce(fmt.Sprintf("AT+FREQ=%.2f", frequency))
 	if cmdErr != nil {
 		return cmdErr
 	}
@@ -318,7 +321,9 @@ func (modem *Modem) FetchStatus() (status Status, err error) {
 		}
 	}()
 
-	respMsgs, cmdErr := modem.sendCmdMultiline("AT+INFO\n", 13)
+	respMsgs, cmdErr := modem.atCommand(
+		"AT+INFO",
+		func(line string) bool { return !strings.HasPrefix(line, "+OK") })
 	if cmdErr != nil {
 		err = cmdErr
 		return
