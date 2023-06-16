@@ -1,10 +1,8 @@
-// Package rf95 provides a software interface for a rf95modem. This allows packets to be received and sent
-// via the known Reader / Writer interfaces.
+// Package rf95 provides a library to send and receive LoRa PHY packets over rf95modem.
 package rf95
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/hex"
 	"fmt"
@@ -18,7 +16,7 @@ import (
 	"github.com/tarm/serial"
 )
 
-// ModemMode is the rf95modem's config mode, as specified by AT+MODE.
+// ModemMode is the rf95modem's config mode, specified by AT+MODE.
 type ModemMode int
 
 const (
@@ -41,7 +39,7 @@ const (
 	maxModemMode = int(SlowLongRange3)
 )
 
-// RxMessage represents an incoming RX message with its fields from the rf95modem.
+// RxMessage represents a received message with its fields.
 type RxMessage struct {
 	Payload []byte
 	Rssi    int
@@ -61,59 +59,49 @@ type Status struct {
 	TxGood    int
 }
 
-func (status Status) String() string {
-	var sb strings.Builder
-
-	_, _ = fmt.Fprint(&sb, "Status(", "firmware=", status.Firmware, ",")
-	_, _ = fmt.Fprintf(&sb, "features=%s,", strings.Join(status.Features, ","))
-	_, _ = fmt.Fprintf(&sb, "mode=%d,", status.Mode)
-	_, _ = fmt.Fprintf(&sb, "mtu=%d,", status.Mtu)
-	_, _ = fmt.Fprintf(&sb, "frequency=%.2f,", status.Frequency)
-	_, _ = fmt.Fprintf(&sb, "big_funky_ble_frames=%d,", status.Bfb)
-	_, _ = fmt.Fprintf(&sb, "rx_bad=%d,", status.RxBad)
-	_, _ = fmt.Fprintf(&sb, "rx_good=%d,", status.RxGood)
-	_, _ = fmt.Fprintf(&sb, "tx_good=%d)", status.TxGood)
-
-	return sb.String()
-}
-
-// Modem is a software library around the connection to a rf95modem. Thus, a Modem might receive and
-// transmit data via LoRa. Furthermore, both Reader and Writer are implemented.
+// Modem manages the connection to a rf95modem.
+//
+// After creation, it's state can be fetched or altered. New handler can be
+// registered for data reception and raw data can be send.
 type Modem struct {
 	devReader io.Reader
 	devWriter io.Writer
 	devCloser io.Closer
 
-	readBuff   *bytes.Buffer
-	cmdLock    sync.Mutex
-	rxHandlers []func(RxMessage)
-	msgQueue   chan string
-	mtu        int
+	rxHandlers   []func(RxMessage)
+	mtuHandlers  []func(int)
+	handlerMutex sync.RWMutex
+
+	sendCmdMutex sync.Mutex
+	msgQueue     chan string
 
 	ctx       context.Context
 	ctxCancel context.CancelFunc
 }
 
-// OpenModem creates a new Modem, connected to a Reader and a Writer. The Closer might be nil.
+// OpenModem creates a new Modem backed by some stream.
+//
+// Both the io.Reader as well as the io.Writer are necessary. The io.Closer
+// might be nil. The Modem finishes when the Context is done.
 func OpenModem(r io.Reader, w io.Writer, c io.Closer, ctx context.Context) (modem *Modem, err error) {
 	modem = &Modem{
 		devReader: r,
 		devWriter: w,
 		devCloser: c,
-		readBuff:  new(bytes.Buffer),
 		msgQueue:  make(chan string, 128),
 	}
 
 	modem.ctx, modem.ctxCancel = context.WithCancel(ctx)
 
-	modem.RegisterRxHandler(modem.rxHandler)
-	go modem.handleRead()
+	go modem.worker()
 
 	return
 }
 
-// OpenSerial creates a new Modem from a serial connection to a rf95modem. The device parameter might be
-// /dev/ttyUSB0, or your operating system's equivalent.
+// OpenSerial creates a new Modem based on a serial connection to a rf95modem.
+//
+// The device parameter might be /dev/ttyUSB0, or your operating system's
+// equivalent. For Context information, check OpenModem's documentation.
 func OpenSerial(device string, ctx context.Context) (modem *Modem, err error) {
 	serialConf := &serial.Config{
 		Name:        device,
@@ -128,139 +116,6 @@ func OpenSerial(device string, ctx context.Context) (modem *Modem, err error) {
 	}
 
 	return OpenModem(serialPort, serialPort, serialPort, ctx)
-}
-
-// handleRead dispatches the inbounding data to the rxQueue for received messages and msgQueue for everything else.
-func (modem *Modem) handleRead() {
-	var reader = bufio.NewReader(modem.devReader)
-	for {
-		select {
-		case <-modem.ctx.Done():
-			return
-
-		default:
-			lineMsg, lineErr := reader.ReadString('\n')
-			if lineErr == io.EOF {
-				continue
-			} else if lineErr != nil {
-				return
-			}
-
-			if strings.HasPrefix(lineMsg, "+RX") {
-				if rxMsg, rxErr := parsePacketRx(lineMsg); rxErr == nil {
-					for _, h := range modem.rxHandlers {
-						h(rxMsg)
-					}
-				}
-			} else {
-				modem.msgQueue <- lineMsg
-			}
-		}
-	}
-}
-
-// Read the next received message in the given byte array.
-//
-// If the byte array's length is shorter than that of the message, the message's data is cached and read on
-// the next call. Should the cache be empty, this method blocks until data is received.
-func (modem *Modem) Read(p []byte) (int, error) {
-	if modem.readBuff.Len() > 0 {
-		return modem.readBuff.Read(p)
-	}
-
-	for {
-		select {
-		case <-modem.ctx.Done():
-			return 0, io.EOF
-
-		default:
-			if modem.readBuff.Len() > 0 {
-				return modem.readBuff.Read(p)
-			}
-			time.Sleep(50 * time.Millisecond)
-		}
-	}
-}
-
-// Transmit the byte array whose length must be shorter than the Mtu. To transfer a byte array regardless
-// of its length, use Write.
-func (modem *Modem) Transmit(p []byte) (int, error) {
-	cmd := fmt.Sprintf("AT+TX=%s\n", hex.EncodeToString(p))
-	respMsg, cmdErr := modem.sendCmd(cmd)
-	if cmdErr != nil {
-		return 0, cmdErr
-	}
-
-	respPattern := regexp.MustCompile(`^\+SENT (\d+) bytes\.\r?\n$`)
-	respMatch := respPattern.FindStringSubmatch(respMsg)
-	if len(respMatch) != 2 {
-		return 0, fmt.Errorf("unexpected response: %s", respMsg)
-	} else if n, nErr := strconv.Atoi(respMatch[1]); nErr != nil {
-		return 0, nErr
-	} else {
-		return n, nil
-	}
-}
-
-// Write the byte array to the rf95modem. If its length exceeds the Mtu, multiple packets will be send.
-func (modem *Modem) Write(p []byte) (n int, err error) {
-	if _, mtuErr := modem.Mtu(); mtuErr != nil {
-		err = mtuErr
-		return
-	}
-
-	for i := 0; i < len(p); i += modem.mtu {
-		bound := i + modem.mtu
-		if bound > len(p) {
-			bound = len(p)
-		}
-
-		tx, txErr := modem.Transmit(p[i:bound])
-		n += tx
-		if txErr != nil {
-			err = txErr
-			return
-		}
-	}
-
-	return
-}
-
-// Close the underlying serial connection.
-func (modem *Modem) Close() (err error) {
-	modem.ctxCancel()
-
-	if modem.devCloser != nil {
-		err = modem.devCloser.Close()
-	}
-
-	modem.rxHandlers = nil
-
-	return
-}
-
-// Mode sets the rf95modem's modem config.
-func (modem *Modem) Mode(mode ModemMode) error {
-	cmd := fmt.Sprintf("AT+MODE=%d\n", mode)
-	if respMsg, cmdErr := modem.sendCmd(cmd); cmdErr != nil {
-		return cmdErr
-	} else if !strings.HasPrefix(respMsg, "+OK") {
-		return fmt.Errorf("changing modem mode returned unexpected response: %s", respMsg)
-	} else {
-		return modem.updateMtu()
-	}
-}
-
-// Frequency changes the rf95modem's frequency, specified in MHz.
-func (modem *Modem) Frequency(frequency float64) error {
-	cmd := fmt.Sprintf("AT+FREQ=%.2f\n", frequency)
-	if respMsg, cmdErr := modem.sendCmd(cmd); cmdErr != nil {
-		return cmdErr
-	} else if !strings.HasPrefix(respMsg, "+FREQ: ") {
-		return fmt.Errorf("changing frequency returned unexpected response: %s", respMsg)
-	} else {
-		return modem.updateMtu()
-	}
 }
 
 // parsePacketRx tries to extract the fields of an RX message.
@@ -283,20 +138,82 @@ func parsePacketRx(msg string) (rx RxMessage, err error) {
 	return
 }
 
-// rxHandler is the RX message handler for the io.Reader.
-func (modem *Modem) rxHandler(rx RxMessage) {
-	_, _ = modem.readBuff.Write(rx.Payload)
+// worker reads the input stream and runs within a Goroutine after OpenModem.
+//
+// Received data will either be distributed to all RX handlers or added to the
+// msgQueue when needed for other tasks.
+func (modem *Modem) worker() {
+	var reader = bufio.NewReader(modem.devReader)
+
+	for {
+		select {
+		case <-modem.ctx.Done():
+			if modem.devCloser != nil {
+				_ = modem.devCloser.Close()
+			}
+			return
+
+		default:
+			lineMsg, lineErr := reader.ReadString('\n')
+			if lineErr == io.EOF {
+				continue
+			} else if lineErr != nil {
+				return
+			}
+
+			if strings.HasPrefix(lineMsg, "+RX") {
+				if rxMsg, rxErr := parsePacketRx(lineMsg); rxErr == nil {
+					modem.handlerMutex.RLock()
+					for _, rxHandler := range modem.rxHandlers {
+						rxHandler(rxMsg)
+					}
+					modem.handlerMutex.RUnlock()
+				}
+			} else {
+				modem.msgQueue <- lineMsg
+			}
+		}
+	}
 }
 
-// RegisterRxHandler calls the handler function for each incoming RX message.
-func (modem *Modem) RegisterRxHandler(handler func(RxMessage)) {
-	modem.rxHandlers = append(modem.rxHandlers, handler)
+// Close down the internal worker and Closer if not nil.
+func (modem *Modem) Close() (err error) {
+	modem.ctxCancel()
+
+	modem.handlerMutex.Lock()
+	modem.rxHandlers = nil
+	modem.mtuHandlers = nil
+	modem.handlerMutex.Unlock()
+
+	return nil
 }
 
-// sendCmdMultiline sends an AT command to the rf95modem and reads the amount of requested responding lines.
+// RegisterHandlers for RxMessages and MTU updates.
+//
+// Each handler might be nil and thus won't be registered. The returned Context
+// will be done if the Modem is finished.
+func (modem *Modem) RegisterHandlers(rxHandler func(RxMessage), mtuHandler func(int)) (context.Context, error) {
+	modem.handlerMutex.Lock()
+	if rxHandler != nil {
+		modem.rxHandlers = append(modem.rxHandlers, rxHandler)
+	}
+	if mtuHandler != nil {
+		modem.mtuHandlers = append(modem.mtuHandlers, mtuHandler)
+	}
+	modem.handlerMutex.Unlock()
+
+	err := modem.refreshMtu()
+	if err != nil {
+		return nil, err
+	}
+
+	return modem.ctx, nil
+}
+
+// sendCmdMultiline sends an AT command and reads the amount of requested responding lines.
 func (modem *Modem) sendCmdMultiline(cmd string, respLines int) (responses []string, err error) {
-	modem.cmdLock.Lock()
-	defer modem.cmdLock.Unlock()
+	modem.sendCmdMutex.Lock()
+	defer modem.sendCmdMutex.Unlock()
 
 	select {
 	case <-modem.ctx.Done():
@@ -316,7 +233,7 @@ func (modem *Modem) sendCmdMultiline(cmd string, respLines int) (responses []str
 	return
 }
 
-// sendCmd sends an AT command to the rf95modem and reads the responding line.
+// sendCmd sends an AT command and reads the responding line.
 func (modem *Modem) sendCmd(cmd string) (response string, err error) {
 	if responses, responsesErr := modem.sendCmdMultiline(cmd, 1); responsesErr != nil {
 		err = responsesErr
@@ -327,18 +244,73 @@ func (modem *Modem) sendCmd(cmd string) (response string, err error) {
 	return
 }
 
-// updateMtu fetches the current MTU.
-func (modem *Modem) updateMtu() (err error) {
-	if status, statusErr := modem.FetchStatus(); statusErr != nil {
-		err = statusErr
-	} else {
-		modem.mtu = status.Mtu
+// Transmit the byte array whose length must be shorter than the Mtu.
+//
+// To transfer a byte array regardless of its length, create a Stream.
+func (modem *Modem) Transmit(p []byte) (int, error) {
+	respMsg, cmdErr := modem.sendCmd(fmt.Sprintf("AT+TX=%s\n", hex.EncodeToString(p)))
+	if cmdErr != nil {
+		return 0, cmdErr
 	}
 
-	return
+	respPattern := regexp.MustCompile(`^\+SENT (\d+) bytes\.\r?\n$`)
+	respMatch := respPattern.FindStringSubmatch(respMsg)
+	if len(respMatch) != 2 {
+		return 0, fmt.Errorf("unexpected response: %s", respMsg)
+	} else if n, nErr := strconv.Atoi(respMatch[1]); nErr != nil {
+		return 0, nErr
+	} else {
+		return n, nil
+	}
 }
 
-// FetchStatus queries the rf95modem's status information.
+// refreshMtu by querying the status and distributing it to all MTU handlers.
+func (modem *Modem) refreshMtu() error {
+	status, err := modem.FetchStatus()
+	if err != nil {
+		return err
+	}
+
+	modem.handlerMutex.RLock()
+	for _, mtuHandler := range modem.mtuHandlers {
+		mtuHandler(status.Mtu)
+	}
+	modem.handlerMutex.RUnlock()
+
+	return nil
+}
+
+// Mode sets the ModemMode.
+func (modem *Modem) Mode(mode ModemMode) error {
+	if int(mode) < 0 || int(mode) > maxModemMode {
+		return fmt.Errorf("modem mode %d is not in [0, %d]", mode, maxModemMode)
+	}
+
+	respMsg, cmdErr := modem.sendCmd(fmt.Sprintf("AT+MODE=%d\n", mode))
+	if cmdErr != nil {
+		return cmdErr
+	}
+	if !strings.HasPrefix(respMsg, "+OK") {
+		return fmt.Errorf("changing modem mode returned unexpected response: %s", respMsg)
+	}
+
+	return modem.refreshMtu()
+}
+
+// Frequency changes the frequency specified in MHz.
+func (modem *Modem) Frequency(frequency float64) error {
+	respMsg, cmdErr := modem.sendCmd(fmt.Sprintf("AT+FREQ=%.2f\n", frequency))
+	if cmdErr != nil {
+		return cmdErr
+	}
+	if !strings.HasPrefix(respMsg, "+FREQ: ") {
+		return fmt.Errorf("changing frequency returned unexpected response: %s", respMsg)
+	}
+
+	return modem.refreshMtu()
+}
+
+// FetchStatus queries the status information from AT+INFO.
 func (modem *Modem) FetchStatus() (status Status, err error) {
 	defer func() {
 		if err != nil {
@@ -428,18 +400,5 @@ func (modem *Modem) FetchStatus() (status Status, err error) {
 		}
 	}
 
-	return
-}
-
-// Mtu returns the rf95modem's MTU.
-func (modem *Modem) Mtu() (mtu int, err error) {
-	if modem.mtu == 0 {
-		if mtuErr := modem.updateMtu(); mtuErr != nil {
-			err = mtuErr
-			return
-		}
-	}
-
-	mtu = modem.mtu
 	return
 }

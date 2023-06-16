@@ -44,7 +44,9 @@ func main() {
 	}
 
 	fmt.Println("unix_nanosec,payload,rssi,snr")
-	modem.RegisterRxHandler(handler)
+	if _, regErr := modem.RegisterHandlers(handler, nil); regErr != nil {
+		panic(regErr)
+	}
 
 	<-sigintCtx.Done()
 

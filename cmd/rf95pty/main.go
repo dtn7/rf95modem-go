@@ -27,7 +27,12 @@ func main() {
 	if status, statusErr := modem.FetchStatus(); statusErr != nil {
 		panic(statusErr)
 	} else {
-		fmt.Printf("Starting modem with %v\n", status)
+		fmt.Printf("Starting modem with %#v\n", status)
+	}
+
+	stream, streamErr := rf95.NewStream(modem)
+	if streamErr != nil {
+		panic(streamErr)
 	}
 
 	ptyMaster, ptySlave, ptyErr := pty()
@@ -37,8 +42,8 @@ func main() {
 
 	fmt.Printf("Opening pty device %s\n", ptySlave)
 
-	go streamCopy(modem, ptyMaster)
-	go streamCopy(ptyMaster, modem)
+	go streamCopy(stream, ptyMaster)
+	go streamCopy(ptyMaster, stream)
 
 	<-sigintCtx.Done()
 
