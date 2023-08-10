@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog][keep-a-changelog], and this project adheres to [Semantic Versioning][semantic-versioning].
 
 ## [Unreleased]
+
+## [0.4.0] - 2023-08-10
 ### Changed
 - Breaking API changes: `Modem` now uses a `context.Context` which must be passed during creation.
 - Breaking API changes: extract `Stream` for `io.Reader` and `io.Writer` operations out of `Modem`.
@@ -65,7 +67,8 @@ First release
 [keep-a-changelog]: https://keepachangelog.com/en/1.1.0/
 [semantic-versioning]: https://semver.org/spec/v2.0.0.html
 
-[unreleased]: https://github.com/dtn7/rf95modem-go/compare/v0.3.2...HEAD
+[unreleased]: https://github.com/dtn7/rf95modem-go/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/dtn7/rf95modem-go/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/dtn7/rf95modem-go/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/dtn7/rf95modem-go/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/dtn7/rf95modem-go/compare/v0.2.0...v0.3.0

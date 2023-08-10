@@ -5,7 +5,7 @@
 
 Golang library to send and receive data over LoRa PHY via a serial connection to a [rf95modem].
 
-This library was tested against the rf95modem commit [`117878a`][rf95modem-commit], slightly after version 0.7.3 including [patch #16][rf95modem-pr16].
+This library was tested against the rf95modem commit [`8f163aa`][rf95modem-commit], slightly after version 0.7.3.
 
 
 ## Library
@@ -166,5 +166,4 @@ $ screen /dev/pts/7
 
 [godoc]: https://pkg.go.dev/github.com/dtn7/rf95modem-go/rf95
 [rf95modem]: https://github.com/gh0st42/rf95modem
-[rf95modem-commit]: https://github.com/gh0st42/rf95modem/commit/117878a4b609f9488ad8d5176f98067b9e8baa01
-[rf95modem-pr16]: https://github.com/gh0st42/rf95modem/pull/16
+[rf95modem-commit]: https://github.com/gh0st42/rf95modem/commit/8f163aa23e6f0c1ca7403c13b0811366e40b7317
